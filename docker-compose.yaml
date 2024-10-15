@@ -1,0 +1,75 @@
+version: "3.9"
+services:
+  mocksensor1:
+    build: mocksensor
+    container_name: mocksensor1
+    command: ["python", "mocksensor.py", "--device_id", "00mac00"]
+    volumes:
+      - ./data/mocksensor:/tmp/
+  mocksensor2:
+    build: mocksensor
+    container_name: mocksensor2
+    command: ["python", "mocksensor.py", "--device_id", "01mac01"]
+    volumes:
+      - ./data/mocksensor:/tmp/
+  mocksensor3:
+    build: mocksensor
+    container_name: mocksensor3
+    command: ["python", "mocksensor.py", "--device_id", "02mac02"]
+    volumes:
+      - ./data/mocksensor:/tmp/
+  emqx:
+    user: root
+    image: "emqx:4.4.3"
+    ports:
+      - "18083:18083"
+    volumes:
+      - ./data/emqx/data:/opt/emqx/data
+      - ./data/emqx/log:/opt/emqx/log
+    environment:
+      - EMQX_DASHBOARD__DEFAULT_USER__LOGIN=manolo
+      - EMQX_DASHBOARD__DEFAULT_USER__PASSWORD=iotcrashcourse
+  telegrafinput:
+    image: "telegraf:1.22.4"
+    volumes:
+      - ./data/telegrafinput/telegraf.conf:/etc/telegraf/telegraf.conf
+      - ./data/mocksensor:/tmp/
+  influxdb:
+    image: "influxdb:2.2.0-alpine"
+    ports:
+      - "8086:8086"
+    volumes:
+      - ./data/influxdb/data:/var/lib/influxdb2
+      - ./data/influxdb/config:/etc/influxdb2
+    environment:
+      - DOCKER_INFLUXDB_INIT_MODE=setup
+      - DOCKER_INFLUXDB_INIT_USERNAME=marcamate
+      - DOCKER_INFLUXDB_INIT_PASSWORD=marcamate
+      - DOCKER_INFLUXDB_INIT_ORG=amate
+      - DOCKER_INFLUXDB_INIT_BUCKET=dadesaltaveu
+      - DOCKER_INFLUXDB_INIT_RETENTION=1w
+      - DOCKER_INFLUXDB_INIT_ADMIN_TOKEN=amate-dadesaltaveu-auth-token
+  telegrafoutput:
+    image: "telegraf:1.22.4"
+    deploy:
+      restart_policy:
+        condition: on-failure
+        delay: 10s
+        max_attempts: 20
+    volumes:
+      - ./data/telegrafoutput/telegraf.conf:/etc/telegraf/telegraf.conf
+  grafana:
+    user: root
+    image: "grafana/grafana:8.5.3"
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD__FILE=/run/secrets/admin_password
+    volumes:
+      - ./data/grafana:/var/lib/grafana
+    secrets:
+      - source: grafana_admin_password
+        target: /run/secrets/admin_password
+secrets:
+  grafana_admin_password:
+    file: ./secrets/grafana_admin_password
