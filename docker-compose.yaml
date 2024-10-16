@@ -58,6 +58,19 @@ services:
         max_attempts: 20
     volumes:
       - ./data/telegrafoutput/telegraf.conf:/etc/telegraf/telegraf.conf
+
+  react-app:
+    build:
+      context: .
+      dockerfile: Dockerfile.react
+    ports:
+      - "3001:80"
+    volumes:
+      - ./build:/usr/share/nginx/html
+    environment:
+      - NODE_ENV=production
+    restart: unless-stopped
+
   grafana:
     user: root
     image: "grafana/grafana:8.5.3"
@@ -73,3 +86,6 @@ services:
 secrets:
   grafana_admin_password:
     file: ./secrets/grafana_admin_password
+
+
+
