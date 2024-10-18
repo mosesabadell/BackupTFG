@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Dashboard Viewer</title>
+  <script>
+    async function fetchDashboard() {
+      const uid = document.getElementById('uid').value; // Obtener el UID del input
+
+      try {
+        const response = await fetch(`http://localhost:3000/api/dashboards/uid/${uid}`, { // Cambiar a localhost:3000 si Grafana está corriendo en este puerto
+          method: 'GET',
+          headers: {
+            'Authorization': 'Bearer eyJrIjoidk9DUmlVU2duRHdwUW1GRlZmQnN2S293cldMQVBPQlkiLCJuIjoiYXMiLCJpZCI6MX0=', // Sustituye con tu token de API de Grafana
+            'Content-Type': 'application/json'
+          }
+        });
+
+        if (!response.ok) {
+          throw new Error(`Error HTTP: ${response.status}`);
+        }
+
+        const data = await response.json();
+        document.getElementById('dashboardTitle').innerText = `Título del Dashboard: ${data.dashboard.title}`;
+        document.getElementById('dashboardContent').innerText = JSON.stringify(data, null, 2);
+      } catch (error) {
+        console.error('Error al obtener el dashboard:', error);
+        document.getElementById('dashboardContent').innerText = `Error: ${error.message}`;
+      }
+    }
+  </script>
+</head>
+<body>
+  <h1>Grafana Dashboard Viewer</h1>
+
+  <!-- Input para introducir el UID del dashboard -->
+  <label for="uid">Dashboard UID:</label>
+  <input type="text" id="uid" placeholder="Introduce el UID del dashboard">
+
+  <!-- Botón para cargar el dashboard -->
+  <button onclick="fetchDashboard()">Cargar Dashboard</button>
+
+  <h2 id="dashboardTitle"></h2>
+  <pre id="dashboardContent"></pre>
+
+</body>
+</html>
