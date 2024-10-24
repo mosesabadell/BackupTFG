@@ -6,13 +6,12 @@ from influxdb_client import InfluxDBClient
 import dash_bootstrap_components as dbc
 import pandas as pd
 import datetime
-import colorlover as cl  # Importar colorlover para las escalas de colores
 
 # Configuración de la conexión a InfluxDB
-url = "http://localhost:8086"  # Cambia si tu InfluxDB está en otro lugar
-token = "amate-dadesaltaveu-auth-token"  # Reemplaza con tu token
-org = "amate"  # Reemplaza con tu organización
-bucket = "dadesaltaveu"  # Reemplaza con tu bucket
+url = "http://192.168.1.7:8086"  # Dirección IP de tu Synology NAS
+token = "amate-dadesaltaveu-auth-token"  # Reemplaza con tu token si es diferente
+org = "amate"  # Reemplaza con tu organización si es diferente
+bucket = "dadesaltaveu"  # Reemplaza con tu bucket si es diferente
 
 # Crear el cliente de InfluxDB
 client = InfluxDBClient(url=url, token=token, org=org)
@@ -59,6 +58,7 @@ app.layout = dbc.Container(fluid=True, children=[
             )
         ])
     ], style={'padding': '20px'}),
+    
     # Fila principal: Columnas izquierda, central y derecha
     dbc.Row([
         # Columna izquierda: Selección de dispositivo y rango de tiempo
@@ -83,23 +83,25 @@ app.layout = dbc.Container(fluid=True, children=[
                 style={'margin-bottom': '20px'}
             ),
         ], width=2, style={'padding': '20px', 'background-color': '#1e1e1e'}),
+        
         # Columna central: Visualización de datos
         dbc.Col([
             html.H4("Datos en Tiempo Real", id='data-header', style={'display': 'none', 'color': '#d4af37'}),
             html.Div(id='graphs-container', children=[], style={'display': 'none'}),
             dcc.Interval(
                 id='interval-component',
-                interval=1 * 1000,  # Actualizar cada 1 segundo
+                interval=2 * 1000,  # Actualizar cada 2 segundos para una visualización más fluida
                 n_intervals=0
             )
         ], width=8),
+        
         # Columna derecha: Descargar datos
         dbc.Col([
             html.H4("Descargar Datos", style={'color': '#d4af37'}),
             html.Label('Opciones de Descarga:'),
             html.Button('Descargar CSV', id='download-button', className='btn btn-primary'),
             dcc.Download(id='download-dataframe-csv'),
-        ], width=2, style={'padding': '20px', 'background-color': '#1e1e1e'}),
+        ], width=2, style={'padding': '20px', 'background-color': '#1e1e1e'})
     ])
 ])
 
@@ -109,20 +111,19 @@ def get_average_color(values, min_value, max_value):
         return 'green'
     avg_value = sum(values) / len(values)
     normalized = (avg_value - min_value) / (max_value - min_value) if max_value > min_value else 0
-    # Interpolar entre verde (0,255,0) y naranja (255,165,0)
     r = int(normalized * (255 - 0) + 0)
     g = int(normalized * (165 - 255) + 255)
     b = 0
     return f'rgba({r},{g},{b},0.6)'  # Añadir transparencia
 
 # Función para obtener datos de InfluxDB
-def get_data(device_id, field, time_range='10m'):
+def get_data(device_id, measurement, field, time_range='10m'):
     query = f'''
     from(bucket: "{bucket}")
     |> range(start: -{time_range})
     |> filter(fn: (r) => r["device_id"] == "{device_id}")
-    |> filter(fn: (r) => r._measurement == "Temperature")
-    |> filter(fn: (r) => r._field == "{field}")
+    |> filter(fn: (r) => r["_measurement"] == "{measurement}")
+    |> filter(fn: (r) => r["_field"] == "{field}")
     |> sort(columns: ["_time"])
     '''
     try:
@@ -149,38 +150,36 @@ def get_data(device_id, field, time_range='10m'):
      Input('zoom-slider', 'value')]
 )
 def update_graphs(n_intervals, selected_device_ids, selected_time_range, zoom_value):
-    # Si no hay dispositivos seleccionados, no mostramos las gráficas
     if not selected_device_ids:
         return [], {'display': 'none'}, {'display': 'none'}
 
-    # Lista para almacenar las gráficas
     graphs = []
 
     for device_id in selected_device_ids:
-        # Inicializar listas de datos para las gráficas del dispositivo actual
         data_temp_list = []
-        data_nivell_list = []
+        data_level_in_list = []
+        data_level_out_list = []
 
         # Obtener datos de temperatura
-        times_temp, values_temp = get_data(device_id, 'temperature', time_range=selected_time_range)
-        # Obtener datos de nivell
-        times_nivell, values_nivell = get_data(device_id, 'nivell', time_range=selected_time_range)
+        times_temp, values_temp = get_data(device_id, "Speaker", "temperature", time_range=selected_time_range)
+        # Obtener datos de nivel de entrada
+        times_level_in, values_level_in = get_data(device_id, "Speaker", "level_in", time_range=selected_time_range)
+        # Obtener datos de nivel de salida
+        times_level_out, values_level_out = get_data(device_id, "Speaker", "level_out", time_range=selected_time_range)
 
-        # Aplicar zoom
         zoom_factor = zoom_value / 100  # Convertir el valor de zoom a un factor
 
-        # Datos para la gráfica de temperatura
         if times_temp and values_temp:
             num_points_temp = int(len(times_temp) * zoom_factor)
             times_temp_zoomed = times_temp[-num_points_temp:]
             values_temp_zoomed = values_temp[-num_points_temp:]
-            # Obtener color promedio
             fill_color_temp = get_average_color(values_temp_zoomed, min(values_temp_zoomed), max(values_temp_zoomed))
 
             data_temp = go.Scatter(
                 x=times_temp_zoomed,
                 y=values_temp_zoomed,
-                mode='lines',
+                mode='lines+markers',  # Añadir marcadores para mejorar la fluidez visual
+                line_shape='spline',  # Usar líneas suaves
                 fill='tozeroy',
                 line=dict(color='rgba(0,0,0,0)'),  # Línea invisible
                 fillcolor=fill_color_temp,
@@ -188,114 +187,74 @@ def update_graphs(n_intervals, selected_device_ids, selected_time_range, zoom_va
                 name=f"Temperatura"
             )
             data_temp_list.append(data_temp)
-        else:
-            data_temp_list = []
 
-        # Datos para la gráfica de nivell
-        if times_nivell and values_nivell:
-            num_points_nivell = int(len(times_nivell) * zoom_factor)
-            times_nivell_zoomed = times_nivell[-num_points_nivell:]
-            values_nivell_zoomed = values_nivell[-num_points_nivell:]
-            # Obtener color promedio
-            fill_color_nivell = get_average_color(values_nivell_zoomed, min(values_nivell_zoomed), max(values_nivell_zoomed))
+        if times_level_in and values_level_in:
+            num_points_level_in = int(len(times_level_in) * zoom_factor)
+            times_level_in_zoomed = times_level_in[-num_points_level_in:]
+            values_level_in_zoomed = values_level_in[-num_points_level_in:]
+            fill_color_level_in = get_average_color(values_level_in_zoomed, min(values_level_in_zoomed), max(values_level_in_zoomed))
 
-            data_nivell = go.Scatter(
-                x=times_nivell_zoomed,
-                y=values_nivell_zoomed,
-                mode='lines',
+            data_level_in = go.Scatter(
+                x=times_level_in_zoomed,
+                y=values_level_in_zoomed,
+                mode='lines+markers',  # Añadir marcadores
+                line_shape='spline',  # Líneas suaves
                 fill='tozeroy',
-                line=dict(color='rgba(0,0,0,0)'),  # Línea invisible
-                fillcolor=fill_color_nivell,
+                line=dict(color='rgba(0,0,0,0)'),
+                fillcolor=fill_color_level_in,
                 hoverinfo='x+y',
-                name=f"Nivell"
+                name=f"Nivel de Entrada"
             )
-            data_nivell_list.append(data_nivell)
-        else:
-            data_nivell_list = []
+            data_level_in_list.append(data_level_in)
 
-        # Crear el layout para ambas gráficas
-        layout_temp = go.Layout(
-            xaxis=dict(title='Tiempo'),
-            yaxis=dict(title='Temperatura (°C)'),
-            title=f'Temperatura en Tiempo Real - {device_id}',
-            xaxis_rangeslider_visible=True,
-            plot_bgcolor='#1e1e1e',  # Fondo del gráfico
-            paper_bgcolor='#1e1e1e',  # Fondo del papel
-            font=dict(color='#f0f0f0')  # Color de las etiquetas
-        )
+        if times_level_out and values_level_out:
+            num_points_level_out = int(len(times_level_out) * zoom_factor)
+            times_level_out_zoomed = times_level_out[-num_points_level_out:]
+            values_level_out_zoomed = values_level_out[-num_points_level_out:]
+            fill_color_level_out = get_average_color(values_level_out_zoomed, min(values_level_out_zoomed), max(values_level_out_zoomed))
 
-        layout_nivell = go.Layout(
+            data_level_out = go.Scatter(
+                x=times_level_out_zoomed,
+                y=values_level_out_zoomed,
+                mode='lines+markers',  # Añadir marcadores
+                line_shape='spline',  # Líneas suaves
+                fill='tozeroy',
+                line=dict(color='rgba(0,0,0,0)'),
+                fillcolor=fill_color_level_out,
+                hoverinfo='x+y',
+                name=f"Nivel de Salida"
+            )
+            data_level_out_list.append(data_level_out)
+
+        layout_common = go.Layout(
             xaxis=dict(title='Tiempo'),
-            yaxis=dict(title='Nivell'),
-            title=f'Nivell en Tiempo Real - {device_id}',
             xaxis_rangeslider_visible=True,
+            uirevision='constant',  # Mantener el estado del gráfico entre actualizaciones
             plot_bgcolor='#1e1e1e',
             paper_bgcolor='#1e1e1e',
             font=dict(color='#f0f0f0')
         )
 
-        # Crear las figuras
         device_graphs = [html.Hr(), html.H4(f"Dispositivo: {device_id}", style={'color': '#d4af37'})]
 
         if data_temp_list:
+            layout_temp = layout_common.update(yaxis=dict(title='Temperatura (°C)'), title=f'Temperatura en Tiempo Real - {device_id}')
             figure_temp = {'data': data_temp_list, 'layout': layout_temp}
             device_graphs.append(dcc.Graph(figure=figure_temp))
-        else:
-            device_graphs.append(html.Div(f"No hay datos de temperatura para el dispositivo {device_id}"))
 
-        if data_nivell_list:
-            figure_nivell = {'data': data_nivell_list, 'layout': layout_nivell}
-            device_graphs.append(dcc.Graph(figure=figure_nivell))
-        else:
-            device_graphs.append(html.Div(f"No hay datos de nivell para el dispositivo {device_id}"))
+        if data_level_in_list:
+            layout_level_in = layout_common.update(yaxis=dict(title='Nivel de Entrada'), title=f'Nivel de Entrada en Tiempo Real - {device_id}')
+            figure_level_in = {'data': data_level_in_list, 'layout': layout_level_in}
+            device_graphs.append(dcc.Graph(figure=figure_level_in))
 
-        # Añadir las gráficas del dispositivo a la lista principal
+        if data_level_out_list:
+            layout_level_out = layout_common.update(yaxis=dict(title='Nivel de Salida'), title=f'Nivel de Salida en Tiempo Real - {device_id}')
+            figure_level_out = {'data': data_level_out_list, 'layout': layout_level_out}
+            device_graphs.append(dcc.Graph(figure=figure_level_out))
+
         graphs.extend(device_graphs)
 
     return graphs, {'display': 'block'}, {'display': 'block'}
-
-# Callback para descargar los datos
-@app.callback(
-    Output('download-dataframe-csv', 'data'),
-    Input('download-button', 'n_clicks'),
-    State('device-checklist', 'value'),
-    State('time-range-dropdown', 'value'),
-    prevent_initial_call=True)
-def download_data(n_clicks, selected_device_ids, selected_time_range):
-    dfs = []
-    for device_id in selected_device_ids:
-        times_temp, values_temp = get_data(device_id, 'temperature', time_range=selected_time_range)
-        times_nivell, values_nivell = get_data(device_id, 'nivell', time_range=selected_time_range)
-
-        if times_temp and values_temp:
-            df_temp = pd.DataFrame({'Tiempo': times_temp, 'Temperatura': values_temp, 'Device_ID': device_id})
-        else:
-            df_temp = pd.DataFrame()
-
-        if times_nivell and values_nivell:
-            df_nivell = pd.DataFrame({'Tiempo': times_nivell, 'Nivell': values_nivell, 'Device_ID': device_id})
-        else:
-            df_nivell = pd.DataFrame()
-
-        # Unir los DataFrames en base al tiempo y Device_ID
-        if not df_temp.empty and not df_nivell.empty:
-            df = pd.merge(df_temp, df_nivell, on=['Tiempo', 'Device_ID'], how='outer').sort_values('Tiempo')
-        elif not df_temp.empty:
-            df = df_temp
-        elif not df_nivell.empty:
-            df = df_nivell
-        else:
-            df = pd.DataFrame()
-
-        if not df.empty:
-            dfs.append(df)
-
-    if dfs:
-        df_all = pd.concat(dfs)
-        filename = f"datos_{selected_time_range}.csv"
-        return dcc.send_data_frame(df_all.to_csv, filename, index=False)
-    else:
-        return None
 
 if __name__ == '__main__':
     app.run_server(debug=True)
